@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Rappel Conso Checker</title>
+  <meta name="description" content="Vérifiez si un produit fait l'objet d'un rappel DGCCRF à partir de son code-barres." />
+  <meta name="theme-color" content="#0f766e" />
+  <link rel="icon" href="static/icons/icon-192.png" />
+  <link rel="stylesheet" href="static/css/style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>Rappel Conso Checker</h1>
+    <p class="subtitle">Vérifiez si un produit est rappelé, à partir de son code-barres</p>
+  </header>
+
+  <main class="app-main">
+    <section class="card">
+      <div id="reader" class="scanner hidden"></div>
+
+      <div class="scanner-controls">
+        <button id="scan-btn" class="btn btn-primary" type="button">📷 Scanner un code-barres</button>
+        <button id="stop-scan-btn" class="btn btn-secondary hidden" type="button">Arrêter le scan</button>
+      </div>
+
+      <form id="manual-form" class="manual-form">
+        <label for="barcode-input">Ou saisissez le code-barres manuellement</label>
+        <div class="manual-form-row">
+          <input
+            id="barcode-input"
+            name="barcode"
+            type="text"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            placeholder="Ex. 3273720193318"
+            autocomplete="off"
+          />
+          <button type="submit" class="btn btn-primary">Vérifier</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="status" class="status hidden" aria-live="polite"></section>
+
+    <section id="results" class="results"></section>
+  </main>
+
+  <footer class="app-footer">
+    <p>
+      Données fournies par
+      <a href="https://rappel.conso.gouv.fr/" target="_blank" rel="noopener">RappelConso</a>
+      (DGCCRF / data.economie.gouv.fr). Ceci est un outil non officiel.
+    </p>
+  </footer>
+
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" defer></script>
+  <script src="static/js/app.js" defer></script>
+</body>
+</html>
