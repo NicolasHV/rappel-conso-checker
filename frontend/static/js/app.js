@@ -282,6 +282,10 @@
       return;
     }
 
+    // Efface un message d'erreur laissé par une tentative précédente
+    // (ex. permission caméra refusée puis accordée au retry).
+    setStatus(null);
+
     readerEl.classList.remove("hidden");
     scanBtn.classList.add("hidden");
     stopScanBtn.classList.remove("hidden");
