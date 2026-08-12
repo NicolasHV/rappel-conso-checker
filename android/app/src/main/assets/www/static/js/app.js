@@ -93,13 +93,39 @@
   const scanBtn = document.getElementById("scan-btn");
   const stopScanBtn = document.getElementById("stop-scan-btn");
   const readerEl = document.getElementById("reader");
+  const videoEl = document.getElementById("scanner-video");
   const manualForm = document.getElementById("manual-form");
   const barcodeInput = document.getElementById("barcode-input");
   const statusEl = document.getElementById("status");
   const resultsEl = document.getElementById("results");
 
-  let scanner = null;
+  // Scan caméra : lecture directe du flux vidéo (getUserMedia) + décodage
+  // via zxing-wasm (ZXing-C++ compilé en WebAssembly, nettement plus
+  // rapide que les décodeurs 1D purement JS). On gère nous-mêmes la
+  // caméra plutôt que de déléguer à une lib tout-en-un, pour garder un
+  // contrôle direct et fiable sur le choix de la caméra arrière.
+  const SCAN_FORMATS = ["EAN13", "EAN8", "UPCA", "UPCE", "Code128", "Code39", "ITF"];
+  const READER_OPTIONS = { formats: SCAN_FORMATS, tryHarder: false, maxNumberOfSymbols: 1 };
+  // Zone décodée = centre du flux vidéo, alignée sur le viseur affiché
+  // (.scanner-viewfinder) : moins de pixels à traiter par image, donc
+  // décodage plus rapide.
+  const CROP_WIDTH_RATIO = 0.8;
+  const CROP_HEIGHT_RATIO = 0.45;
+
+  const scanCanvas = document.createElement("canvas");
+  const scanCtx = scanCanvas.getContext("2d", { willReadFrequently: true });
+
+  let mediaStream = null;
   let scanning = false;
+  let scanRafHandle = null;
+
+  if (typeof ZXingWASM !== "undefined") {
+    // Précharge le module WASM en tâche de fond pour éviter le délai de
+    // premier chargement au moment où l'utilisateur lance le scan.
+    ZXingWASM.prepareZXingModule({ fireImmediately: true }).catch(() => {
+      /* le premier scan se chargera du module si le préchargement échoue */
+    });
+  }
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
@@ -212,8 +238,46 @@
     checkBarcode(barcode);
   });
 
+  async function scanLoop() {
+    if (!scanning) return;
+
+    if (videoEl.readyState < videoEl.HAVE_CURRENT_DATA) {
+      scanRafHandle = requestAnimationFrame(scanLoop);
+      return;
+    }
+
+    const videoWidth = videoEl.videoWidth;
+    const videoHeight = videoEl.videoHeight;
+    const cropWidth = Math.round(videoWidth * CROP_WIDTH_RATIO);
+    const cropHeight = Math.round(videoHeight * CROP_HEIGHT_RATIO);
+    const cropX = Math.round((videoWidth - cropWidth) / 2);
+    const cropY = Math.round((videoHeight - cropHeight) / 2);
+
+    scanCanvas.width = cropWidth;
+    scanCanvas.height = cropHeight;
+    scanCtx.drawImage(videoEl, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+
+    try {
+      const imageData = scanCtx.getImageData(0, 0, cropWidth, cropHeight);
+      const results = await ZXingWASM.readBarcodes(imageData, READER_OPTIONS);
+      if (results.length > 0) {
+        const decodedText = results[0].text;
+        stopScanning();
+        barcodeInput.value = decodedText;
+        checkBarcode(decodedText);
+        return;
+      }
+    } catch (err) {
+      /* per-frame decode failures are expected while aiming the camera */
+    }
+
+    if (scanning) {
+      scanRafHandle = requestAnimationFrame(scanLoop);
+    }
+  }
+
   async function startScanning() {
-    if (typeof Html5Qrcode === "undefined") {
+    if (typeof ZXingWASM === "undefined") {
       setStatus("Le module de scan n'a pas pu être chargé (vérifiez votre connexion).", "error");
       return;
     }
@@ -222,46 +286,25 @@
     scanBtn.classList.add("hidden");
     stopScanBtn.classList.remove("hidden");
 
-    scanner = new Html5Qrcode("reader", {
-      formatsToSupport: [
-        Html5QrcodeSupportedFormats.EAN_13,
-        Html5QrcodeSupportedFormats.EAN_8,
-        Html5QrcodeSupportedFormats.UPC_A,
-        Html5QrcodeSupportedFormats.UPC_E,
-        Html5QrcodeSupportedFormats.CODE_128,
-        Html5QrcodeSupportedFormats.CODE_39,
-        Html5QrcodeSupportedFormats.ITF,
-      ],
-      // Utilise l'API native BarcodeDetector quand le navigateur la
-      // supporte (bien plus rapide que le décodeur JS de repli).
-      useBarCodeDetectorIfSupported: true,
-      verbose: false,
-    });
-
     try {
-      await scanner.start(
-        {
-          facingMode: "environment",
-          // Ignoré silencieusement si le device ne le supporte pas.
-          advanced: [{ focusMode: "continuous" }],
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
         },
-        {
-          fps: 20,
-          qrbox: { width: 260, height: 140 },
-          // Évite les flux caméra en résolution inutilement élevée qui
-          // ralentissent chaque frame à décoder.
-          videoConstraints: { width: { ideal: 1280 }, height: { ideal: 720 } },
-        },
-        (decodedText) => {
-          barcodeInput.value = decodedText;
-          stopScanning();
-          checkBarcode(decodedText);
-        },
-        () => {
-          /* per-frame decode failures are expected while aiming the camera */
-        }
-      );
+        audio: false,
+      });
+
+      const [videoTrack] = mediaStream.getVideoTracks();
+      // Best-effort : ignoré si le device/navigateur ne le supporte pas.
+      videoTrack.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
+
+      videoEl.srcObject = mediaStream;
+      await videoEl.play();
+
       scanning = true;
+      scanRafHandle = requestAnimationFrame(scanLoop);
     } catch (err) {
       setStatus(
         "Impossible d'accéder à la caméra. Vérifiez les autorisations ou saisissez le code manuellement.",
@@ -277,16 +320,17 @@
     stopScanBtn.classList.add("hidden");
   }
 
-  async function stopScanning() {
-    if (scanner && scanning) {
-      try {
-        await scanner.stop();
-        scanner.clear();
-      } catch (err) {
-        /* scanner may already be stopped */
-      }
-    }
+  function stopScanning() {
     scanning = false;
+    if (scanRafHandle !== null) {
+      cancelAnimationFrame(scanRafHandle);
+      scanRafHandle = null;
+    }
+    if (mediaStream) {
+      mediaStream.getTracks().forEach((track) => track.stop());
+      mediaStream = null;
+    }
+    videoEl.srcObject = null;
     resetScanUI();
   }
 
