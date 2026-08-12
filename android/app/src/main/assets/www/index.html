@@ -57,7 +57,14 @@
     </p>
   </footer>
 
-  <script src="https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.2/dist/iife/reader/index.js" defer></script>
+  <!-- SRI : si la version pinnée de zxing-wasm change, régénérer ce hash
+       (sinon le chargement du script sera bloqué par le navigateur). -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.2/dist/iife/reader/index.js"
+    integrity="sha384-qm7q9qnfndgnqy/oBSuAvw9HoAWxbRQhs6HwwKdfQ9Q20BAr1rlWD7N11Skbwjd2"
+    crossorigin="anonymous"
+    defer
+  ></script>
   <script src="static/js/app.js" defer></script>
 </body>
 </html>
