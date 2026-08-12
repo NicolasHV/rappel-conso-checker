@@ -1,11 +1,11 @@
-const CACHE_NAME = "rappel-conso-checker-v1";
+const CACHE_NAME = "rappel-conso-checker-v2";
 const APP_SHELL = [
-  "/",
-  "/manifest.json",
-  "/static/css/style.css",
-  "/static/js/app.js",
-  "/static/icons/icon-192.png",
-  "/static/icons/icon-512.png",
+  "./",
+  "manifest.json",
+  "static/css/style.css",
+  "static/js/app.js",
+  "static/icons/icon-192.png",
+  "static/icons/icon-512.png",
 ];
 
 self.addEventListener("install", (event) => {
@@ -29,12 +29,10 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
-  // Never cache API calls: recall data must always be fresh.
-  if (url.pathname.startsWith("/api/")) {
-    return;
-  }
-
-  if (event.request.method !== "GET") {
+  // Only cache the same-origin app shell. Calls to the RappelConso API
+  // (different origin) always go straight to the network so recall data
+  // stays fresh.
+  if (url.origin !== self.location.origin || event.request.method !== "GET") {
     return;
   }
 
