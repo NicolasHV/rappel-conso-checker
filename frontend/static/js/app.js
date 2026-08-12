@@ -1,6 +1,95 @@
 (() => {
   "use strict";
 
+  // Site 100% statique : pas de backend, appel direct à l'API RappelConso
+  // (dataset "rappelconso-v2-gtin-trie", une ligne par GTIN rappelé) depuis
+  // le navigateur.
+  const DATASET = "rappelconso-v2-gtin-trie";
+  const BASE_URL = `https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/${DATASET}/records`;
+  const RESULT_LIMIT = 20;
+
+  const FIELD_MAP = {
+    reference: "numero_fiche",
+    category: "categorie_produit",
+    subcategory: "sous_categorie_produit",
+    brand: "marque_produit",
+    model: "modeles_ou_references",
+    identification: "identification_produits",
+    reason: "motif_rappel",
+    risks: "risques_encourus",
+    conduct: "conduites_a_tenir_par_le_consommateur",
+    publication_date: "date_publication",
+    sale_zone: "zone_geographique_de_vente",
+    distributors: "distributeurs",
+    images: "liens_vers_les_images",
+    sheet_link: "lien_vers_la_fiche_rappel",
+  };
+
+  const MIN_BARCODE_LEN = 6;
+  const MAX_BARCODE_LEN = 14;
+
+  function extractImages(raw) {
+    if (!raw) return [];
+    return String(raw)
+      .split(/[|;,\s]+/)
+      .filter((part) => part.startsWith("http"));
+  }
+
+  function formatRecord(record) {
+    const formatted = {};
+    for (const [key, sourceField] of Object.entries(FIELD_MAP)) {
+      if (sourceField === FIELD_MAP.images) continue;
+      formatted[key] = record[sourceField] ?? null;
+    }
+    formatted.images = extractImages(record[FIELD_MAP.images]);
+    formatted.gtin = record.gtin ?? null;
+    return formatted;
+  }
+
+  class RappelConsoError extends Error {}
+
+  async function searchByBarcode(barcode) {
+    // "gtin" est un champ numérique : le filtre d'égalité ODSQL renvoie
+    // déjà exactement les lignes correspondantes, sans post-filtrage.
+    const url = `${BASE_URL}?${new URLSearchParams({ where: `gtin=${barcode}`, limit: RESULT_LIMIT })}`;
+
+    let response;
+    try {
+      response = await fetch(url);
+    } catch (err) {
+      throw new RappelConsoError(`Impossible de contacter l'API RappelConso : ${err.message}`);
+    }
+    if (!response.ok) {
+      throw new RappelConsoError(`Impossible de contacter l'API RappelConso : HTTP ${response.status}`);
+    }
+
+    let payload;
+    try {
+      payload = await response.json();
+    } catch (err) {
+      throw new RappelConsoError("Réponse invalide de l'API RappelConso");
+    }
+
+    return (payload.results || []).map(formatRecord);
+  }
+
+  async function checkBarcodeRemote(barcode) {
+    if (!/^\d+$/.test(barcode) || barcode.length < MIN_BARCODE_LEN || barcode.length > MAX_BARCODE_LEN) {
+      const err = new Error(
+        "Code-barres invalide : attendu une suite de 6 à 14 chiffres (EAN-8, UPC-A, EAN-13, GTIN-14...)."
+      );
+      err.isValidation = true;
+      throw err;
+    }
+    const recalls = await searchByBarcode(barcode);
+    return {
+      barcode,
+      found: recalls.length > 0,
+      count: recalls.length,
+      recalls,
+    };
+  }
+
   const scanBtn = document.getElementById("scan-btn");
   const stopScanBtn = document.getElementById("stop-scan-btn");
   const readerEl = document.getElementById("reader");
@@ -14,7 +103,9 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("/service-worker.js").catch(() => {
+      // Chemin relatif : le site peut être servi depuis un sous-chemin
+      // (ex. GitHub Pages, https://<user>.github.io/<repo>/).
+      navigator.serviceWorker.register("service-worker.js").catch(() => {
         /* offline shell is a nice-to-have, not critical */
       });
     });
@@ -105,11 +196,7 @@
     clearResults();
     setStatus("Recherche en cours…", "info");
     try {
-      const response = await fetch(`/api/check/${encodeURIComponent(barcode)}`);
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.detail || "Erreur inconnue");
-      }
+      const data = await checkBarcodeRemote(barcode);
       setStatus(null);
       renderResults(data);
     } catch (err) {
