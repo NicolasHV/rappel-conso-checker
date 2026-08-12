@@ -232,13 +232,26 @@
         Html5QrcodeSupportedFormats.CODE_39,
         Html5QrcodeSupportedFormats.ITF,
       ],
+      // Utilise l'API native BarcodeDetector quand le navigateur la
+      // supporte (bien plus rapide que le décodeur JS de repli).
+      useBarCodeDetectorIfSupported: true,
       verbose: false,
     });
 
     try {
       await scanner.start(
-        { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 260, height: 140 } },
+        {
+          facingMode: "environment",
+          // Ignoré silencieusement si le device ne le supporte pas.
+          advanced: [{ focusMode: "continuous" }],
+        },
+        {
+          fps: 20,
+          qrbox: { width: 260, height: 140 },
+          // Évite les flux caméra en résolution inutilement élevée qui
+          // ralentissent chaque frame à décoder.
+          videoConstraints: { width: { ideal: 1280 }, height: { ideal: 720 } },
+        },
         (decodedText) => {
           barcodeInput.value = decodedText;
           stopScanning();
