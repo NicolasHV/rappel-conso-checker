@@ -1,26 +1,24 @@
 (() => {
   "use strict";
 
-  // Variante autonome (APK) : pas de backend, appelle directement l'API
-  // RappelConso depuis le WebView. Logique de correspondance/formatage
-  // portée depuis backend/app/rappelconso.py pour rester cohérente.
-
-  const DATASET = "rappelconso-v2-gtin-espaces";
+  // Site 100% statique : pas de backend, appel direct à l'API RappelConso
+  // (dataset "rappelconso-v2-gtin-trie", une ligne par GTIN rappelé) depuis
+  // le navigateur.
+  const DATASET = "rappelconso-v2-gtin-trie";
   const BASE_URL = `https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/${DATASET}/records`;
-  const GTIN_FIELD = "gtin";
   const RESULT_LIMIT = 20;
 
   const FIELD_MAP = {
-    reference: "reference_fiche",
-    category: "categorie_de_produit",
-    subcategory: "sous_categorie_de_produit",
-    brand: "nom_de_la_marque_du_produit",
-    model: "noms_des_modeles_ou_references",
-    identification: "identification_des_produits",
-    reason: "motif_du_rappel",
-    risks: "risques_encourus_par_le_consommateur",
+    reference: "numero_fiche",
+    category: "categorie_produit",
+    subcategory: "sous_categorie_produit",
+    brand: "marque_produit",
+    model: "modeles_ou_references",
+    identification: "identification_produits",
+    reason: "motif_rappel",
+    risks: "risques_encourus",
     conduct: "conduites_a_tenir_par_le_consommateur",
-    publication_date: "date_de_publication",
+    publication_date: "date_publication",
     sale_zone: "zone_geographique_de_vente",
     distributors: "distributeurs",
     images: "liens_vers_les_images",
@@ -29,24 +27,6 @@
 
   const MIN_BARCODE_LEN = 6;
   const MAX_BARCODE_LEN = 14;
-
-  function gtinTokens(record) {
-    const value = record[GTIN_FIELD];
-    if (!value) return [];
-    return String(value).trim().split(/\s+/);
-  }
-
-  function recordMatches(record, barcode) {
-    const tokens = gtinTokens(record);
-    if (tokens.length > 0) {
-      return tokens.includes(barcode);
-    }
-    for (const value of Object.values(record)) {
-      if (value === null || value === undefined) continue;
-      if (String(value).split(/\s+/).includes(barcode)) return true;
-    }
-    return false;
-  }
 
   function extractImages(raw) {
     if (!raw) return [];
@@ -62,16 +42,16 @@
       formatted[key] = record[sourceField] ?? null;
     }
     formatted.images = extractImages(record[FIELD_MAP.images]);
-    formatted.gtin = gtinTokens(record);
-    formatted.raw = record;
+    formatted.gtin = record.gtin ?? null;
     return formatted;
   }
 
   class RappelConsoError extends Error {}
 
   async function searchByBarcode(barcode) {
-    const query = `search(${GTIN_FIELD}, "${barcode}")`;
-    const url = `${BASE_URL}?${new URLSearchParams({ where: query, limit: RESULT_LIMIT })}`;
+    // "gtin" est un champ numérique : le filtre d'égalité ODSQL renvoie
+    // déjà exactement les lignes correspondantes, sans post-filtrage.
+    const url = `${BASE_URL}?${new URLSearchParams({ where: `gtin=${barcode}`, limit: RESULT_LIMIT })}`;
 
     let response;
     try {
@@ -90,8 +70,7 @@
       throw new RappelConsoError("Réponse invalide de l'API RappelConso");
     }
 
-    const results = payload.results || [];
-    return results.filter((r) => recordMatches(r, barcode)).map(formatRecord);
+    return (payload.results || []).map(formatRecord);
   }
 
   async function checkBarcodeRemote(barcode) {
@@ -121,6 +100,16 @@
 
   let scanner = null;
   let scanning = false;
+
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      // Chemin relatif : le site peut être servi depuis un sous-chemin
+      // (ex. GitHub Pages, https://<user>.github.io/<repo>/).
+      navigator.serviceWorker.register("service-worker.js").catch(() => {
+        /* offline shell is a nice-to-have, not critical */
+      });
+    });
+  }
 
   function setStatus(message, type) {
     if (!message) {

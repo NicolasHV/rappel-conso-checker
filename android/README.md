@@ -2,9 +2,10 @@
 
 Empaquetage natif (WebView) du site web déjà présent sur `main`
 (`frontend/`), pour installation directe sur Android sous forme de fichier
-`.apk`. Contrairement à la version PWA (`frontend/` + `backend/`), cette
-variante **n'a pas de backend** : le JavaScript embarqué appelle directement
-l'API RappelConso (`data.economie.gouv.fr`) depuis la WebView.
+`.apk`. Le site (`frontend/`) est lui-même 100% statique — pas de backend —
+et le JavaScript embarqué dans l'APK appelle directement l'API RappelConso
+(`data.economie.gouv.fr`) depuis la WebView, exactement comme le fait
+`frontend/static/js/app.js`.
 
 ## Pourquoi pas Gradle / Android Studio / Capacitor ?
 
@@ -59,15 +60,17 @@ android/
     AndroidManifest.xml             # package fr.huetvasseur.rappelconsochecker, permissions INTERNET+CAMERA
     java/.../MainActivity.java      # WebView plein écran + gestion permission caméra
     res/                            # icône de l'app (dérivée de frontend/static/icons/icon-512.png), strings.xml
-    assets/www/                     # copie du site (index.html, css, icônes) + app.js autonome
+    assets/www/                     # copie du site (index.html, css, icônes, app.js)
 ```
 
-`assets/www/static/js/app.js` est une variante autonome de
-`frontend/static/js/app.js` : même interface, mais `checkBarcode()` appelle
-directement l'API RappelConso au lieu de passer par `/api/check/{barcode}`
-(logique de correspondance GTIN portée depuis `backend/app/rappelconso.py`).
-Si l'un des deux évolue fonctionnellement, penser à répercuter le
-changement dans l'autre.
+`assets/www/` est une copie de `frontend/` (à l'identique pour `style.css`
+et `static/js/app.js` ; `index.html` diffère seulement par l'absence des
+balises `<link>` vers `manifest.json`/`apple-touch-icon`, propres à la PWA
+et sans objet dans un wrapper natif — `manifest.json` et
+`service-worker.js` ne sont pas embarqués non plus, pour la même raison).
+Une seule logique applicative à maintenir : après toute modification de
+`frontend/`, recopier les fichiers concernés ici puis relancer
+`./build.sh`.
 
 ## Limites connues
 
@@ -77,15 +80,13 @@ changement dans l'autre.
   Play Store sur l'appareil — donc `getUserMedia` (scan caméra) et le JS
   moderne fonctionnent normalement sur un téléphone à jour malgré cette
   contrainte de compilation.
-- **CORS non vérifié en conditions réelles** : cette variante suppose que
-  `data.economie.gouv.fr` autorise les appels `fetch` cross-origin depuis une
-  page `file://` (comportement standard des API OpenDataSoft publiques,
-  mais non testé ici — le réseau de l'environnement de développement bloque
-  ce domaine). À vérifier en priorité après installation sur un vrai
-  téléphone ; si le fetch échoue pour cette raison, il faudra soit héberger
-  la variante PWA+backend (`frontend/`+`backend/` sur `main`) sur un serveur
-  accessible et pointer le WebView vers cette URL au lieu des assets locaux,
-  soit passer par un proxy CORS.
+- **CORS** : confirmé en conditions réelles (`access-control-allow-origin: *`
+  renvoyé par l'API RappelConso), donc l'appel `fetch` cross-origin depuis
+  la WebView (origine `file://`) devrait fonctionner. Reste à confirmer
+  spécifiquement le comportement de `file://` comme "secure context" pour
+  `getUserMedia` (scan caméra) sur un vrai appareil — comportement standard
+  des WebView Chromium modernes, mais non testé faute d'émulateur/téléphone
+  disponible dans l'environnement de build.
 - APK signé avec une clé de **debug auto-générée**, adaptée au sideload
   personnel mais pas à une publication sur le Play Store (nécessiterait une
   vraie clé de release, gérée séparément).
